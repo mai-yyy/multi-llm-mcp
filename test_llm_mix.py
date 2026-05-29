@@ -23,14 +23,9 @@ from fastmcp import Client
 from openai import APIConnectionError
 
 
-# ---------------------------------------------------------------------------
-# 每个测试前后清空全局会话，保证测试互不污染
-# ---------------------------------------------------------------------------
 @pytest.fixture(autouse=True)
 def _clean_state():
-    # autouse=True 表示每个测试都会自动执行这个 fixture。
-    # yield 之前是测试前清理; yield 之后是测试后清理。
-    # 这样某个测试创建的 session 不会污染下一个测试。
+
     LLM_MIX.SESSIONS.clear()
     LLM_MIX.SESSION_LOCKS.clear()
     yield
@@ -39,32 +34,26 @@ def _clean_state():
 
 
 def _conn_error():
-    """构造一个可重试的 openai 异常"""
+
     return APIConnectionError(request=httpx.Request("POST", "https://example.com"))
 
 
 def _fake_openai(text="reply"):
-    """伪造一个 OpenAI client，create() 返回指定文本"""
+
     client = MagicMock()
     client.chat.completions.create.return_value.choices[0].message.content = text
     return client
 
 
 async def _call_tool(name, args):
-    """通过 FastMCP 内存客户端调用工具，返回工具的原始返回值"""
-    # Client(LLM_MIX.mcp) 是进程内调用,不会启动独立 MCP 服务进程。
-    # result.data 就是 MCP tool 函数实际 return 的 Python 值。
+
     async with Client(LLM_MIX.mcp) as client:
         result = await client.call_tool(name, args)
         return result.data
 
 
-# ===========================================================================
-# 1. 纯函数测试（无依赖、最该先写）
-# ===========================================================================
 class TestTruncate:
-    # _truncate 用来限制 ask_codex 的 stdout/stderr 返回长度。
-    # 这些测试确保短文本不变,超长文本保留头尾并插入省略提示。
+
     def test_short_unchanged(self):
         assert LLM_MIX._truncate("hello") == "hello"
 
@@ -85,8 +74,7 @@ class TestTruncate:
 
 
 class TestCheckHistory:
-    # _check_history 负责裁剪会话历史。
-    # 关键行为: 消息过多时保留最新消息; 如果第一条是 system, 必须保留在第一位。
+
     def test_under_limit_returns_all(self):
         h = [{"role": "user", "content": str(i)} for i in range(5)]
         assert LLM_MIX._check_history(h) == h
@@ -107,8 +95,7 @@ class TestCheckHistory:
 
 
 class TestExtractCodexSessionId:
-    # ask_codex 会从 Codex CLI 输出中提取 session id。
-    # 这里覆盖正常 UUID、缺失、格式错误三种情况。
+
     def test_valid_uuid(self):
         sid = "12345678-1234-1234-1234-123456789abc"
         assert LLM_MIX._extract_codex_session_id(f"xx session id: {sid} yy") == sid
@@ -121,8 +108,7 @@ class TestExtractCodexSessionId:
 
 
 class TestSessionLock:
-    # 同一个 session_id 必须拿到同一把锁,避免并发 ask 覆盖会话历史。
-    # 不同 session_id 应该互不阻塞,所以锁对象应不同。
+
     def test_same_sid_same_lock(self):
         assert LLM_MIX._get_session_lock("x") is LLM_MIX._get_session_lock("x")
 
@@ -130,12 +116,8 @@ class TestSessionLock:
         assert LLM_MIX._get_session_lock("a") is not LLM_MIX._get_session_lock("b")
 
 
-# ===========================================================================
-# 2. 重试逻辑测试（mock，验证 _call_with_retry）
-# ===========================================================================
 class TestCallWithRetry:
-    # _call_with_retry 是底层请求重试器。
-    # 这些测试不真的请求网络,只用 Mock 模拟成功、可重试失败、不可重试失败。
+
     def test_success_first_try(self):
         f = Mock(return_value="ok")
         assert LLM_MIX._call_with_retry(f) == "ok"
@@ -147,7 +129,7 @@ class TestCallWithRetry:
         with patch("LLM_MIX.time.sleep") as slp:
             assert LLM_MIX._call_with_retry(f, max_attempts=3) == "ok"
         assert f.call_count == 3
-        assert slp.call_count == 2  # 失败 2 次 → 退避 2 次
+        assert slp.call_count == 2
 
     def test_exhausted_raises(self):
         f = Mock(side_effect=[_conn_error()] * 3)
@@ -162,12 +144,8 @@ class TestCallWithRetry:
         assert f.call_count == 1  # 不可重试的错误立即抛出，不重试
 
 
-# ===========================================================================
-# 3. _call / 单次调用逻辑（mock OpenAI）
-# ===========================================================================
+
 class TestCall:
-    # _call 负责把 prompt/system 组装成 OpenAI chat completions 请求。
-    # 这里 patch 掉 OpenAI client, 只验证参数组装和返回值处理。
     def test_basic_reply(self):
         client = _fake_openai("hi")
         with patch.object(LLM_MIX, "OpenAI", return_value=client):
