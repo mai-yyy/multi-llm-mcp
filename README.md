@@ -176,6 +176,10 @@ claude mcp list
 3. 长任务建议使用 `job_id` + `wait_*` 的方式继续等待。
 4. 个人本地调试可以图方便，但公开仓库前要检查是否包含真实密钥、私人路径或其他敏感信息。
 
+## 社区 / 致谢
+
+本项目在 [LINUX DO](https://linux.do) 社区分享与讨论，感谢社区佬友的反馈与建议。
+
 ## License
 
 MIT License
